@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Tech Challenge 3 - Lambda de autenticação + API Gateway da aplicação
+
+# Parâmetros substituídos no deploy via --parameter-overrides ou GitHub Actions secrets
+Parameters:
+
+  # Banco 
+  DbUrl:
+    Type: String
+    Description: "URL JDBC do PostgreSQL. Ex: jdbc:postgresql://host:5432/oficina"
+    Default: jdbc:postgresql://PENDENTE:5432/oficina
+  DbUser:
+    Type: String
+    Description: Usuário do banco
+    Default: postgres
+  DbPassword:
+    Type: String
+    NoEcho: true  
+    Description: Senha do banco
+
+  # JWT 
+  JwtSecret:
+    Type: String
+    NoEcho: true  
+    Description: "Chave de assinatura JWT (mín. 32 chars)."
+
+  # EKS 
+  EksLoadBalancerDns:
+    Type: String
+    Description: DNS do Load Balancer do EKS
+    Default: ""
+
+  # VPC 
+  # VpcSubnetIds:
+  #   Type: CommaDelimitedList
+  #   Description: IDs das subnets privadas (ex: subnet-aaa,subnet-bbb)
+  # VpcSecurityGroupIds:
+  #   Type: CommaDelimitedList
+  #   Description: IDs dos Security Groups da Lambda
+
+Globals:
+  Function:
+    Timeout: 20
+    MemorySize: 512
+    Runtime: java21
+    Architectures:
+      - x86_64
+    LoggingConfig:
+      LogFormat: JSON
+
+Resources:
+
+  # API Gateway 
+  AuthApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Description: "Roteia /auth para Lambda e demais rotas para o EKS"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: !Sub "${AWS::StackName}-api"
+          version: "1.0"
+        paths:
+
+          # POST /auth → Lambda (autenticação via CPF)
+          /auth:
+            post:
+              summary: Autentica cliente por CPF e retorna token JWT
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      required: [cpf]
+                      properties:
+                        cpf:
+                          type: string
+                          example: "529.982.247-25"
+              responses:
+                "200":
+                  description: Token JWT gerado com sucesso
+                "400":
+                  description: CPF ausente ou inválido
+                "401":
+                  description: Cliente não encontrado
+                "500":
+                  description: Erro interno
+              x-amazon-apigateway-integration:
+                type: aws_proxy        # envia o evento completo para a Lambda
+                httpMethod: POST
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthFunction.Arn}/invocations"
+                passthroughBehavior: when_no_match
+
+          # ANY /{proxy+} → EKS (todas as demais rotas da aplicação)
+          /{proxy+}:
+            x-amazon-apigateway-any-method:
+              parameters:
+                - name: proxy
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+              responses:
+                "200":
+                  description: Resposta da aplicação principal
+              x-amazon-apigateway-integration:
+                type: http_proxy       # repassa a requisição para o EKS
+                httpMethod: ANY
+                uri: !Sub "http://${EksLoadBalancerDns}/{proxy}"
+                requestParameters:
+                  integration.request.path.proxy: method.request.path.proxy
+                passthroughBehavior: when_no_match
+
+  # Lambda 
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: AuthFunction
+      Handler: com.fiap.auth.AuthHandler::handleRequest
+      Environment:
+        Variables:
+          DB_URL: !Ref DbUrl
+          DB_USER: !Ref DbUser
+          DB_PASSWORD: !Ref DbPassword
+          JWT_SECRET: !Ref JwtSecret
+      Events:
+        AuthEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /auth
+            Method: post
+
+      # VpcConfig:
+      #   SubnetIds: !Ref VpcSubnetIds
+      #   SecurityGroupIds: !Ref VpcSecurityGroupIds
+
+Outputs:
+  AuthEndpoint:
+    Description: "URL de autenticação — POST { cpf: '...' }"
+    Value: !Sub "https://${AuthApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/auth"
+  AppProxyEndpoint:
+    Description: URL base do proxy para a aplicação principal
+    Value: !Sub "https://${AuthApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod"
+  AuthFunctionArn:
+    Description: ARN da Lambda
+    Value: !GetAtt AuthFunction.Arn
+  AuthFunctionRoleArn:
+    Description: ARN da IAM Role da Lambda
+    Value: !GetAtt AuthFunctionRole.Arn
