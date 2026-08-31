@@ -1,0 +1,48 @@
+# Roda testes e validações
+name: SAM Validate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "lambda-auth/**"
+      - ".github/workflows/sam-*.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sam-validate
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: us-east-1
+  JAVA_VERSION: "21"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: corretto
+
+      - uses: aws-actions/setup-sam@v2
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Rodar testes unitários
+        run: ./gradlew test
+        working-directory: lambda-auth/AuthFunction
+
+      - name: Validar template SAM
+        run: sam validate --lint --template lambda-auth/template.yaml

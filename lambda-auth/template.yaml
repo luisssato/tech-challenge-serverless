@@ -18,12 +18,14 @@ Parameters:
     Type: String
     NoEcho: true  
     Description: Senha do banco
+    Default: admin
 
   # JWT 
   JwtSecret:
     Type: String
     NoEcho: true  
     Description: "Chave de assinatura JWT (mín. 32 chars)."
+    Default: segredo-jwt-com-mais-de-32-caracteres-para-teste-local
 
   # EKS 
   EksLoadBalancerDns:
