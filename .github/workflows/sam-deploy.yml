@@ -49,6 +49,26 @@ jobs:
       - name: Build SAM
         run: sam build --template lambda-auth/template.yaml
 
+      - name: Limpar stack em ROLLBACK_COMPLETE
+        run: |
+          STATUS=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].StackStatus" \
+            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+          if [ "$STATUS" = "ROLLBACK_COMPLETE" ]; then
+            echo "Stack em ROLLBACK_COMPLETE, deletando antes do deploy..."
+            aws cloudformation delete-stack \
+              --stack-name ${{ env.STACK_NAME }} \
+              --region ${{ env.AWS_REGION }}
+            aws cloudformation wait stack-delete-complete \
+              --stack-name ${{ env.STACK_NAME }} \
+              --region ${{ env.AWS_REGION }}
+            echo "Stack deletado. Prosseguindo com novo deploy."
+          else
+            echo "Stack status: $STATUS. Nenhuma ação necessária."
+          fi
+
       - name: Deploy na AWS
         run: |
           sam deploy \
