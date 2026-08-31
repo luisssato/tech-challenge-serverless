@@ -33,6 +33,12 @@ Parameters:
     Description: DNS do Load Balancer do EKS
     Default: ""
 
+  # IAM 
+  LabRoleName:
+    Type: String
+    Description: Nome da IAM Role pré-existente do AWS Academy
+    Default: LabRole
+
   # VPC 
   # VpcSubnetIds:
   #   Type: CommaDelimitedList
@@ -122,6 +128,7 @@ Resources:
     Properties:
       CodeUri: AuthFunction
       Handler: com.fiap.auth.AuthHandler::handleRequest
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/${LabRoleName}"
       Environment:
         Variables:
           DB_URL: !Ref DbUrl
@@ -150,6 +157,3 @@ Outputs:
   AuthFunctionArn:
     Description: ARN da Lambda
     Value: !GetAtt AuthFunction.Arn
-  AuthFunctionRoleArn:
-    Description: ARN da IAM Role da Lambda
-    Value: !GetAtt AuthFunctionRole.Arn
