@@ -40,12 +40,12 @@ Parameters:
     Default: LabRole
 
   # VPC 
-  # VpcSubnetIds:
-  #   Type: CommaDelimitedList
-  #   Description: IDs das subnets privadas 
-  # VpcSecurityGroupIds:
-  #   Type: CommaDelimitedList
-  #   Description: IDs dos Security Groups da Lambda
+  VpcSubnetIds:
+    Type: CommaDelimitedList
+    Description: IDs das subnets privadas
+  VpcSecurityGroupIds:
+    Type: CommaDelimitedList
+    Description: IDs dos Security Groups da Lambda
 
 Globals:
   Function:
@@ -102,25 +102,25 @@ Resources:
                 uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthFunction.Arn}/invocations"
                 passthroughBehavior: when_no_match
 
-          # API Gateway
-          # /{proxy+}:
-          #   x-amazon-apigateway-any-method:
-          #     parameters:
-          #       - name: proxy
-          #         in: path
-          #         required: true
-          #         schema:
-          #           type: string
-          #     responses:
-          #       "200":
-          #         description: Resposta da aplicação principal
-          #     x-amazon-apigateway-integration:
-          #       type: http_proxy
-          #       httpMethod: ANY
-          #       uri: !Sub "http://${EksLoadBalancerDns}/{proxy}"
-          #       requestParameters:
-          #         integration.request.path.proxy: method.request.path.proxy
-          #       passthroughBehavior: when_no_match
+          # Encaminhamento para a aplicação no cluster EKS
+          /{proxy+}:
+            x-amazon-apigateway-any-method:
+              parameters:
+                - name: proxy
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+              responses:
+                "200":
+                  description: Resposta da aplicação principal
+              x-amazon-apigateway-integration:
+                type: http_proxy
+                httpMethod: ANY
+                uri: !Sub "http://${EksLoadBalancerDns}/{proxy}"
+                requestParameters:
+                  integration.request.path.proxy: method.request.path.proxy
+                passthroughBehavior: when_no_match
 
   # Lambda 
   AuthFunction:
@@ -143,9 +143,9 @@ Resources:
             Path: /auth
             Method: post
 
-      # VpcConfig:
-      #   SubnetIds: !Ref VpcSubnetIds
-      #   SecurityGroupIds: !Ref VpcSecurityGroupIds
+      VpcConfig:
+        SubnetIds: !Ref VpcSubnetIds
+        SecurityGroupIds: !Ref VpcSecurityGroupIds
 
 Outputs:
   AuthEndpoint:
