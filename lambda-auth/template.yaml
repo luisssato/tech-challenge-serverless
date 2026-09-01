@@ -8,8 +8,8 @@ Parameters:
   # Banco 
   DbUrl:
     Type: String
-    Description: "URL JDBC do PostgreSQL. Ex: jdbc:postgresql://host:5432/oficina"
-    Default: jdbc:postgresql://PENDENTE:5432/oficina
+    Description: "URL JDBC do PostgreSQL."
+    Default: jdbc:postgresql://localhost:5432/oficina
   DbUser:
     Type: String
     Description: Usuário do banco
@@ -24,8 +24,8 @@ Parameters:
   JwtSecret:
     Type: String
     NoEcho: true  
-    Description: "Chave de assinatura JWT (mín. 32 chars)."
-    Default: segredo-jwt-com-mais-de-32-caracteres-para-teste-local
+    Description: "Chave de assinatura JWT."
+    Default: minha-chave-secreta-dev-minimo-32-chars!!
 
   # EKS 
   EksLoadBalancerDns:
@@ -33,10 +33,16 @@ Parameters:
     Description: DNS do Load Balancer do EKS
     Default: ""
 
+  # IAM 
+  LabRoleName:
+    Type: String
+    Description: Nome da IAM Role pré-existente do AWS Academy
+    Default: LabRole
+
   # VPC 
   # VpcSubnetIds:
   #   Type: CommaDelimitedList
-  #   Description: IDs das subnets privadas (ex: subnet-aaa,subnet-bbb)
+  #   Description: IDs das subnets privadas 
   # VpcSecurityGroupIds:
   #   Type: CommaDelimitedList
   #   Description: IDs dos Security Groups da Lambda
@@ -96,25 +102,25 @@ Resources:
                 uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthFunction.Arn}/invocations"
                 passthroughBehavior: when_no_match
 
-          # ANY /{proxy+} → EKS (todas as demais rotas da aplicação)
-          /{proxy+}:
-            x-amazon-apigateway-any-method:
-              parameters:
-                - name: proxy
-                  in: path
-                  required: true
-                  schema:
-                    type: string
-              responses:
-                "200":
-                  description: Resposta da aplicação principal
-              x-amazon-apigateway-integration:
-                type: http_proxy       # repassa a requisição para o EKS
-                httpMethod: ANY
-                uri: !Sub "http://${EksLoadBalancerDns}/{proxy}"
-                requestParameters:
-                  integration.request.path.proxy: method.request.path.proxy
-                passthroughBehavior: when_no_match
+          # API Gateway
+          # /{proxy+}:
+          #   x-amazon-apigateway-any-method:
+          #     parameters:
+          #       - name: proxy
+          #         in: path
+          #         required: true
+          #         schema:
+          #           type: string
+          #     responses:
+          #       "200":
+          #         description: Resposta da aplicação principal
+          #     x-amazon-apigateway-integration:
+          #       type: http_proxy
+          #       httpMethod: ANY
+          #       uri: !Sub "http://${EksLoadBalancerDns}/{proxy}"
+          #       requestParameters:
+          #         integration.request.path.proxy: method.request.path.proxy
+          #       passthroughBehavior: when_no_match
 
   # Lambda 
   AuthFunction:
@@ -122,6 +128,7 @@ Resources:
     Properties:
       CodeUri: AuthFunction
       Handler: com.fiap.auth.AuthHandler::handleRequest
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/${LabRoleName}"
       Environment:
         Variables:
           DB_URL: !Ref DbUrl
@@ -150,6 +157,3 @@ Outputs:
   AuthFunctionArn:
     Description: ARN da Lambda
     Value: !GetAtt AuthFunction.Arn
-  AuthFunctionRoleArn:
-    Description: ARN da IAM Role da Lambda
-    Value: !GetAtt AuthFunctionRole.Arn
