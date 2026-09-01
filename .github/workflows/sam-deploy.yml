@@ -69,9 +69,6 @@ jobs:
             echo "Stack status: $STATUS. Nenhuma ação necessária."
           fi
 
-      # Parametros da VPC
-      #   VpcSubnetIds="${{ secrets.VPC_SUBNET_IDS }}" \
-      #   VpcSecurityGroupIds="${{ secrets.VPC_SECURITY_GROUP_IDS }}" \
       - name: Deploy na AWS
         run: |
           sam deploy \
@@ -86,7 +83,9 @@ jobs:
               DbUser="${{ secrets.DB_USER }}" \
               DbPassword="${{ secrets.DB_PASSWORD }}" \
               JwtSecret="${{ secrets.JWT_SECRET }}" \
-              EksLoadBalancerDns="${{ secrets.EKS_LOAD_BALANCER_DNS }}"
+              EksLoadBalancerDns="${{ secrets.EKS_LOAD_BALANCER_DNS }}" \
+              VpcSubnetIds="${{ secrets.VPC_SUBNET_IDS }}" \
+              VpcSecurityGroupIds="${{ secrets.VPC_SECURITY_GROUP_IDS }}"
 
       - name: Exibir outputs do deploy
         run: |
