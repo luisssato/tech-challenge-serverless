@@ -1,15 +1,19 @@
 # tech-challenge-serverless
 
-Módulo serverless de autenticação e gateway do **Tech Challenge — Fase 3**.
+Módulo serverless de autenticação e gateway do **Tech Challenge — Fase 4**.
 
-Provisiona a função **AWS Lambda** em Java 21 para autenticação de clientes via CPF e o **Amazon API Gateway** (REST API) como porta de entrada única para todo o tráfego da aplicação da oficina.
+Provisiona a função **AWS Lambda** em Java 21 para autenticação de clientes via CPF e o **Amazon API Gateway** (REST API) atuando como ponto de entrada único (Reverse Proxy / Fachada) para os 3 microsserviços da oficina no EKS.
 
 ---
 
 ## Propósito
 
-- **Autenticação de Clientes:** validação do CPF de clientes (formato e dígitos verificadores) e consulta à base de dados para emissão de token JWT.
-- **Ponto de Entrada Centralizado:** provisionamento de um API Gateway REST atuando como gateway único da solução, roteando chamadas de autenticação para a Lambda (`/auth`) e encaminhando requisições de negócio para a aplicação no EKS (`/{proxy+}`).
+- **Autenticação de Clientes:** validação do CPF de clientes (formato e dígitos verificadores) e consulta à base de dados (`os.usuario`) para emissão de token JWT com claim `CLIENTE`.
+- **Ponto de Entrada Centralizado (API Gateway):** provisionamento de um API Gateway REST atuando como gateway único da solução:
+  - Roteia `/auth` para a Lambda de autenticação.
+  - Encaminha `/os/{proxy+}` para o **`os-service`** no EKS.
+  - Encaminha `/execution/{proxy+}` para o **`execution-service`** no EKS.
+  - Encaminha `/billing/{proxy+}` para o **`billing-service`** no EKS.
 
 ---
 
@@ -33,14 +37,14 @@ Provisiona a função **AWS Lambda** em Java 21 para autenticação de clientes 
 ├── sam-validate.yml    CI: compilação, testes unitários e validação do template SAM
 └── sam-deploy.yml      CD: build e deploy automático na AWS
 lambda-auth/
-├── template.yaml       Template SAM (Definição da Lambda e API Gateway)
+├── template.yaml       Template SAM (Definição da Lambda e API Gateway com rotas /os, /execution, /billing)
 └── AuthFunction/       Código-fonte da função de autenticação
     ├── build.gradle
     └── src/
         ├── main/java/com/fiap/auth/
         │   ├── AuthHandler.java          Handler de entrada da requisição API Gateway
         │   ├── DocumentoValidator.java   Validação matemática e normalização de CPF
-        │   ├── UsuarioRepository.java    Consulta JDBC à base PostgreSQL
+        │   ├── UsuarioRepository.java    Consulta JDBC à base PostgreSQL (schema os)
         │   └── JwtUtil.java             Geração e assinatura do token JWT
         └── test/java/com/fiap/auth/
             ├── AuthHandlerTest.java
@@ -54,29 +58,29 @@ lambda-auth/
 ## Arquitetura deste Repositório
 
 ```
-                  ┌──────────────────────┐
-                  │    API Gateway       │
-                  └──────────┬───────────┘
-                             │
-             ┌───────────────┴───────────────┐
-             │ /auth                         │ /{proxy+}
-             ▼                               ▼
-   ┌──────────────────┐            ┌──────────────────┐
-   │   AWS Lambda     │            │   Cluster EKS    │
-   │  (AuthFunction)  │            │ (App Principal)  │
-   └─────────┬────────┘            └──────────────────┘
-             │ JDBC (VPC)
-             ▼
-   ┌──────────────────┐
-   │  RDS PostgreSQL  │
-   └──────────────────┘
+                            ┌───────────────────────────┐
+                            │   Amazon API Gateway      │
+                            └─────────────┬─────────────┘
+                                          │
+         ┌────────────────────────┬───────┴───────┬─────────────────────────┐
+         │ /auth                  │ /os/{proxy+}  │ /execution/{proxy+}     │ /billing/{proxy+}
+         ▼                        ▼               ▼                         ▼
+┌──────────────────┐    ┌──────────────────┐    ┌───────────────────┐    ┌───────────────────┐
+│   AWS Lambda     │    │    os-service    │    │ execution-service │    │  billing-service  │
+│  (AuthFunction)  │    │      (EKS)       │    │       (EKS)       │    │       (EKS)       │
+└────────┬─────────┘    └──────────────────┘    └───────────────────┘    └───────────────────┘
+         │ JDBC (VPC)
+         ▼
+┌──────────────────┐
+│  RDS PostgreSQL  │ (schema: os)
+└──────────────────┘
 ```
 
 ### Fluxo de Autenticação
 
-- **Clientes:** enviam o CPF para `POST /auth`. A Lambda valida o documento, consulta a tabela `usuario` no PostgreSQL e retorna um JWT com a claim `role: "CLIENTE"`. O cliente utiliza este token no header `Authorization: Bearer <token>` para consumir as rotas protegidas da aplicação.
-- **Usuários Internos:** realizam login por usuário e senha diretamente na aplicação principal (`POST /api/auth/login`), que emite o JWT com a role correspondente (`GERENTE`, `ATENDENTE`, `MECANICO`).
-- Ambos os emissores utilizam o mesmo `JWT_SECRET`, garantindo que a aplicação principal valide os tokens de forma uniforme.
+- **Clientes:** enviam o CPF para `POST /auth`. A Lambda valida o documento, consulta a tabela `os.usuario` no PostgreSQL e retorna um JWT com a claim `role: "CLIENTE"`. O cliente utiliza este token no header `Authorization: Bearer <token>` para consumir as rotas protegidas dos microsserviços.
+- **Usuários Internos:** realizam login por usuário e senha diretamente no `os-service` (`POST /os/api/auth/login`), que emite o JWT com a role correspondente (`GERENTE`, `ATENDENTE`, `MECANICO`).
+- Ambos os emissores utilizam o mesmo `JWT_SECRET`, garantindo validação uniforme em todos os microsserviços.
 
 ---
 
@@ -142,10 +146,12 @@ curl -X POST http://127.0.0.1:3000/auth \
 | `AWS_SECRET_ACCESS_KEY` | Chave secreta AWS |
 | `AWS_SESSION_TOKEN` | Token de sessão temporário (AWS Academy Learner Lab) |
 | `JWT_SECRET` | Chave de assinatura dos tokens (mínimo 32 caracteres) |
-| `DB_URL` | String de conexão JDBC (`jdbc:postgresql://<host>:5432/<db>`) |
+| `DB_URL` | String de conexão JDBC do RDS do `os-service` (`jdbc:postgresql://<host>:5432/<db>`) |
 | `DB_USER` | Usuário do banco de dados |
 | `DB_PASSWORD` | Senha do banco de dados |
-| `EKS_LOAD_BALANCER_DNS` | DNS externo do Load Balancer da aplicação principal |
+| `OS_SERVICE_LB_DNS` | DNS externo do Load Balancer (NLB) do `os-service` |
+| `EXECUTION_SERVICE_LB_DNS` | DNS externo do Load Balancer (NLB) do `execution-service` |
+| `BILLING_SERVICE_LB_DNS` | DNS externo do Load Balancer (NLB) do `billing-service` |
 | `VPC_SUBNET_IDS` | Subnets privadas da VPC para a Lambda |
 | `VPC_SECURITY_GROUP_IDS` | Security Group autorizado no banco de dados |
 
@@ -202,7 +208,9 @@ Content-Type: application/json
 Após o provisionamento na AWS, a stack exporta os seguintes valores:
 
 - **`AuthEndpoint`:** URL HTTPS pública para autenticação de clientes (`POST /auth`).
-- **`AppProxyEndpoint`:** URL base do API Gateway para roteamento das requisições para o cluster EKS.
+- **`OsProxyEndpoint`:** URL base do proxy para o `os-service` (`https://<api-id>.execute-api.<region>.amazonaws.com/Prod/os`).
+- **`ExecutionProxyEndpoint`:** URL base do proxy para o `execution-service` (`https://<api-id>.execute-api.<region>.amazonaws.com/Prod/execution`).
+- **`BillingProxyEndpoint`:** URL base do proxy para o `billing-service` (`https://<api-id>.execute-api.<region>.amazonaws.com/Prod/billing`).
 - **`AuthFunctionArn`:** ARN da função Lambda provisionada.
 
 ---
