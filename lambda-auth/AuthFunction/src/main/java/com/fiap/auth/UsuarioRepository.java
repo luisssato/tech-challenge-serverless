@@ -12,24 +12,32 @@ public class UsuarioRepository {
     private final String dbUrl;
     private final String dbUser;
     private final String dbPassword;
+    private final String dbSchema;
 
     /** Construtor de produção */
     public UsuarioRepository() {
         this.dbUrl = System.getenv("DB_URL");
         this.dbUser = System.getenv("DB_USER");
         this.dbPassword = System.getenv("DB_PASSWORD");
+        String envSchema = System.getenv("DB_SCHEMA");
+        this.dbSchema = (envSchema != null && !envSchema.isBlank()) ? envSchema : "os";
     }
 
     /** Construtor testável */
     public UsuarioRepository(String dbUrl, String dbUser, String dbPassword) {
+        this(dbUrl, dbUser, dbPassword, "os");
+    }
+
+    public UsuarioRepository(String dbUrl, String dbUser, String dbPassword, String dbSchema) {
         this.dbUrl = dbUrl;
         this.dbUser = dbUser;
         this.dbPassword = dbPassword;
+        this.dbSchema = (dbSchema != null && !dbSchema.isBlank()) ? dbSchema : "os";
     }
 
     /** Retorna a role do usuário pelo login (CPF normalizado) */
     public String buscarRolePorLogin(String login) {
-        String query = "SELECT role FROM oficina.usuario WHERE login = ?";
+        String query = "SELECT role FROM " + dbSchema + ".usuario WHERE login = ?";
 
         try (Connection connection = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
                 PreparedStatement preparedStatement = connection.prepareStatement(query)) {
